@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import Gallery3D, { type Identity, type Quality } from "./Gallery3D";
 import Stage from "./Stage";
 import CharacterCreator from "./CharacterCreator";
@@ -64,9 +65,10 @@ export default function GalleryApp() {
   const [quality, setQuality] = useState<Quality>("cinematic");
   const [cinema, setCinema] = useState(false);
 
+  // FIX 1: Added `slot` tracking to the form state
   const [form, setForm] = useState({
     title: "", artist: "", year: "", description: "", url: "",
-    mediaType: "image" as "image" | "video", poster: "",
+    mediaType: "image" as "image" | "video", poster: "", slot: null as number | null
   });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -431,14 +433,27 @@ export default function GalleryApp() {
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, type: file.type, size: file.size }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      if (!supabaseUrl || !publishableKey) {
+        throw new Error("Supabase Storage is not configured");
+      }
+      const supabase = createClient(supabaseUrl, publishableKey);
+      const { error } = await supabase.storage
+        .from(data.bucket)
+        .uploadToSignedUrl(data.path, data.token, file, { contentType: file.type });
+      if (error) throw error;
+      const { data: publicFile } = supabase.storage.from(data.bucket).getPublicUrl(data.path);
       setForm((f) => ({
         ...f,
-        url: data.url,
+        url: publicFile.publicUrl,
         mediaType: data.mediaType === "video" ? "video" : "image",
         title: f.title || file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
       }));
@@ -469,12 +484,15 @@ export default function GalleryApp() {
           url: form.url.trim(),
           posterUrl: form.poster.trim() || null,
           year: form.year ? Number(form.year) : null,
+          // FIX 2: We now tell the database exactly which slot to put this in
+          slot: form.slot !== null ? form.slot : undefined 
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not add");
       setExhibits((prev) => [...prev, data.exhibit]);
-      setForm({ title: "", artist: "", year: "", description: "", url: "", mediaType: "image", poster: "" });
+      // Reset form and clear the target slot
+      setForm({ title: "", artist: "", year: "", description: "", url: "", mediaType: "image", poster: "", slot: null });
       setSheet(null);
       notify(`“${data.exhibit.title}” is now hanging in the gallery.`);
       window.setTimeout(() => visit(data.exhibit as ExhibitDTO), 400);
@@ -576,7 +594,16 @@ export default function GalleryApp() {
           emoteRef={emoteRef}
           joystickRef={joystickRef}
           onNearExhibit={setNear}
-          onSelectExhibit={setSelected}
+          onFrameClick={(slotIndex, ex) => {
+            if (ex) {
+              // Clicking a full frame: Open ExhibitModal to view/edit/delete
+              setSelected(ex);
+            } else {
+              // FIX 3: Clicking an empty frame: Set the slot target and open Add Panel
+              setForm(f => ({ ...f, slot: slotIndex }));
+              setSheet("add" as FeatureTab); 
+            }
+          }}
         />
       </Stage>
 
@@ -658,6 +685,7 @@ export default function GalleryApp() {
         onChange={(patch) => setSelected((s) => (s ? { ...s, ...patch } : s))}
         onSave={saveLabel}
         onVisit={() => selected && visit(selected)}
+        // The Delete button lives inside this modal!
         onDelete={() => selected && deleteExhibit(selected)}
       />
 

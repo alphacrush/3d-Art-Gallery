@@ -1,44 +1,61 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 30 * 1024 * 1024;
+const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "gallery-assets";
+
+function storageClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const secretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !secretKey) {
+    throw new Error("Supabase Storage requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY");
+  }
+  return createClient(url, secretKey, { auth: { persistSession: false } });
+}
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    const body = await req.json();
+    if (
+      typeof body?.name !== "string" ||
+      typeof body?.type !== "string" ||
+      typeof body?.size !== "number"
+    ) {
+      return NextResponse.json({ error: "File name, type, and size are required" }, { status: 400 });
     }
-    if (file.size > MAX_BYTES) {
+    if (body.size <= 0 || body.size > MAX_BYTES) {
       return NextResponse.json({ error: "File too large (max 30 MB)" }, { status: 413 });
     }
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
+    const isImage = body.type.startsWith("image/");
+    const isVideo = body.type.startsWith("video/");
     if (!isImage && !isVideo) {
       return NextResponse.json({ error: "Only image or video files are supported" }, { status: 415 });
     }
-    const ext = path.extname(file.name).replace(/[^a-zA-Z0-9.]/g, "") || (isVideo ? ".mp4" : ".jpg");
+    const ext = path.extname(body.name).replace(/[^a-zA-Z0-9.]/g, "") || (isVideo ? ".mp4" : ".jpg");
     const safeBase = path
-      .basename(file.name, path.extname(file.name))
+      .basename(body.name, path.extname(body.name))
       .replace(/[^a-zA-Z0-9-_]/g, "-")
       .slice(0, 40);
-    const filename = `${crypto.randomUUID().slice(0, 8)}-${safeBase}${ext.toLowerCase()}`;
-    const dir = path.join(process.cwd(), "public", "uploads");
-    await fs.mkdir(dir, { recursive: true });
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(path.join(dir, filename), buffer);
+    const filename = `uploads/${crypto.randomUUID()}-${safeBase}${ext.toLowerCase()}`;
+    const { data, error } = await storageClient().storage.from(BUCKET).createSignedUploadUrl(filename);
+    if (error) {
+      console.error("Failed to create Supabase Storage upload URL:", error);
+      return NextResponse.json({ error: "Could not prepare file upload" }, { status: 500 });
+    }
     return NextResponse.json({
-      url: `/api/files/${filename}`,
+      bucket: BUCKET,
+      path: data.path,
+      token: data.token,
       mediaType: isVideo ? "video" : "image",
-      name: file.name,
+      name: body.name,
+      contentType: body.type,
     });
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    return NextResponse.json({ error: "Could not prepare file upload" }, { status: 500 });
   }
 }

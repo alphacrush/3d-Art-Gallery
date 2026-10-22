@@ -7,7 +7,7 @@ const serif = Fraunces({ subsets: ["latin"], variable: "--font-serif", weight: [
 const sans = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Atelier — Social 3D Art Gallery",
+  title: "SUNFLWR - Gallery",
   description:
     "A beautiful walkable 3D gallery for your pictures and video clips. Invite friends with a link — every visitor appears as a live character in the hall.",
 };

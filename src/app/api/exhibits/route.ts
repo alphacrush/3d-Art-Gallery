@@ -55,10 +55,13 @@ export async function POST(req: Request) {
     const room = String(body.galleryCode || "grand-hall").slice(0, 48);
     const title = String(body.title || "").trim();
     const url = String(body.url || "").trim();
+    
     if (!title || !url) {
       return NextResponse.json({ error: "Title and media URL are required" }, { status: 400 });
     }
+    
     const [cnt] = await db.select({ n: count() }).from(exhibits).where(eq(exhibits.galleryCode, room));
+    
     const [created] = await db
       .insert(exhibits)
       .values({
@@ -70,9 +73,11 @@ export async function POST(req: Request) {
         url: url.slice(0, 2000),
         posterUrl: body.posterUrl ? String(body.posterUrl).slice(0, 2000) : null,
         year: body.year ? Number(body.year) : null,
-        slot: cnt?.n ?? 0,
+        // FIX: The database now securely binds the artwork to the exact frame you clicked
+        slot: body.slot !== undefined && body.slot !== null ? Number(body.slot) : (cnt?.n ?? 0),
       })
       .returning();
+      
     return NextResponse.json({ exhibit: created }, { status: 201 });
   } catch (err) {
     console.error(err);
