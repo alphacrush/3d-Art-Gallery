@@ -89,6 +89,7 @@ export default function GalleryApp() {
   const exhibitsRef = useRef(exhibits);
   const guidesOnRef = useRef(guidesOn);
   const lastMsgRef = useRef(0);
+  const sheetRef = useRef<FeatureTab | null>(null);
 
   useEffect(() => {
     identityRef.current = identity;
@@ -96,7 +97,8 @@ export default function GalleryApp() {
     sessionRef.current = sessionId;
     exhibitsRef.current = exhibits;
     guidesOnRef.current = guidesOn;
-  }, [identity, room, sessionId, exhibits, guidesOn]);
+    sheetRef.current = sheet;
+  }, [identity, room, sessionId, exhibits, guidesOn, sheet]);
 
   /* ---------------- helpers ---------------- */
   const notify = useCallback((msg: string) => {
@@ -107,6 +109,47 @@ export default function GalleryApp() {
   const mergeRemotes = useCallback(() => {
     remoteRef.current = [...realRef.current, ...(guidesOnRef.current ? guideRef.current.map((g) => g.data) : [])];
   }, []);
+
+  /** Wipe chat from DATABASE + local state (no history). */
+  const clearRoomChat = useCallback(async () => {
+    setMessages([]);
+    lastMsgRef.current = 0;
+    setUnread(0);
+    setChatInput("");
+    try {
+      await fetch(`/api/chat?room=${encodeURIComponent(roomRef.current)}`, {
+        method: "DELETE",
+        keepalive: true,
+      });
+    } catch {
+      /* offline — local already cleared */
+    }
+  }, []);
+
+  /** Close feature sheet; if chat was open, delete DB history. */
+  const closeSheet = useCallback(() => {
+    if (sheetRef.current === "chat") {
+      void clearRoomChat();
+    }
+    setSheet(null);
+  }, [clearRoomChat]);
+
+  /** Open/toggle a feature tab; leaving chat wipes DB history. */
+  const openFeature = useCallback(
+    (tab: FeatureTab) => {
+      setSheet((s) => {
+        if (s === tab) {
+          // closing the same tab
+          if (s === "chat") void clearRoomChat();
+          return null;
+        }
+        // switching away from chat to another tab
+        if (s === "chat" && tab !== "chat") void clearRoomChat();
+        return tab;
+      });
+    },
+    [clearRoomChat],
+  );
 
   /* ---------------- boot ---------------- */
   useEffect(() => {
@@ -231,14 +274,23 @@ export default function GalleryApp() {
     const leave = () => {
       const payload = JSON.stringify({ sessionId: sessionRef.current });
       if (navigator.sendBeacon) navigator.sendBeacon("/api/presence", payload);
+      // Also wipe chat when leaving the page so no history persists
+      if (sheetRef.current === "chat") {
+        fetch(`/api/chat?room=${encodeURIComponent(roomRef.current)}`, {
+          method: "DELETE",
+          keepalive: true,
+        }).catch(() => {});
+      }
     };
     window.addEventListener("beforeunload", leave);
+    window.addEventListener("pagehide", leave);
 
     return () => {
       alive = false;
       window.clearInterval(t1);
       window.clearInterval(t2);
       window.removeEventListener("beforeunload", leave);
+      window.removeEventListener("pagehide", leave);
     };
   }, [entered, sessionId, room, mergeRemotes]);
 
@@ -335,9 +387,9 @@ export default function GalleryApp() {
       teleport(pose.viewX, pose.viewZ, Math.atan2(pose.x - pose.viewX, pose.z - pose.viewZ));
       setSelected(null);
       setEditing(false);
-      setSheet(null);
+      closeSheet();
     },
-    [notify, teleport],
+    [notify, teleport, closeSheet],
   );
 
   const emote = useCallback(
@@ -361,14 +413,14 @@ export default function GalleryApp() {
       if (k === "4") emote("spin");
       if (k === "5") emote("bow");
       if (k === "escape") {
-        setSheet(null);
+        closeSheet();
         setSelected(null);
         setEditing(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [near, emote]);
+  }, [near, emote, closeSheet]);
 
   const enterGallery = () => {
     const id: Identity = {
@@ -387,10 +439,15 @@ export default function GalleryApp() {
   const switchRoom = (code: string) => {
     const clean = code.replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 48);
     if (!clean) return;
+    // Leaving a room while chat is open → wipe that room's chat history
+    if (sheetRef.current === "chat") {
+      void clearRoomChat();
+    }
     const url = new URL(window.location.href);
     url.searchParams.set("room", clean);
     window.history.replaceState({}, "", url.toString());
     setRoom(clean);
+    setSheet(null);
     teleport(0, 9.6, Math.PI);
     notify(`You entered room “${clean}”. Share the link to meet here.`);
   };
@@ -485,7 +542,7 @@ export default function GalleryApp() {
           posterUrl: form.poster.trim() || null,
           year: form.year ? Number(form.year) : null,
           // FIX 2: We now tell the database exactly which slot to put this in
-          slot: form.slot !== null ? form.slot : undefined 
+          slot: form.slot !== null ? form.slot : undefined
         }),
       });
       const data = await res.json();
@@ -493,7 +550,7 @@ export default function GalleryApp() {
       setExhibits((prev) => [...prev, data.exhibit]);
       // Reset form and clear the target slot
       setForm({ title: "", artist: "", year: "", description: "", url: "", mediaType: "image", poster: "", slot: null });
-      setSheet(null);
+      closeSheet();
       notify(`“${data.exhibit.title}” is now hanging in the gallery.`);
       window.setTimeout(() => visit(data.exhibit as ExhibitDTO), 400);
     } catch (e) {
@@ -577,7 +634,7 @@ export default function GalleryApp() {
         onToggleCinema={() => setCinema((c) => !c)}
         onFullscreen={() => document.documentElement.requestFullscreen?.().catch(() => undefined)}
         onTeleport={(x, z) => teleport(x, z)}
-        onOpenFeature={(tab) => setSheet((s) => (s === tab ? null : tab))}
+        onOpenFeature={openFeature}
         onInvite={copyInvite}
         onOpenProfile={() => {
           setDraft({ name: identity.name, gender: identity.gender, color: identity.color, hat: identity.hat });
@@ -601,7 +658,7 @@ export default function GalleryApp() {
             } else {
               // FIX 3: Clicking an empty frame: Set the slot target and open Add Panel
               setForm(f => ({ ...f, slot: slotIndex }));
-              setSheet("add" as FeatureTab); 
+              openFeature("add");
             }
           }}
         />
@@ -625,8 +682,8 @@ export default function GalleryApp() {
 
       <FeatureSheet
         open={sheet}
-        onClose={() => setSheet(null)}
-        onOpenTab={(t) => setSheet((s) => (s === t ? null : t))}
+        onClose={closeSheet}
+        onOpenTab={openFeature}
         exhibits={exhibits}
         filtered={filtered}
         search={search}
@@ -650,7 +707,7 @@ export default function GalleryApp() {
         onWave={() => emote("wave")}
         onInvite={() => {
           copyInvite();
-          setSheet(null);
+          closeSheet();
         }}
         onToggleGuides={() => {
           setGuidesOn((v) => !v);

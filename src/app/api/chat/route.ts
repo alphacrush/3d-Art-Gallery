@@ -55,3 +55,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to send" }, { status: 500 });
   }
 }
+
+/** Wipe all chat rows for this room from the DATABASE (no history). */
+export async function DELETE(req: Request) {
+  try {
+    await ensureDb();
+    const url = new URL(req.url);
+    let room = url.searchParams.get("room") || url.searchParams.get("galleryCode");
+
+    if (!room) {
+      try {
+        const body = await req.json();
+        room = body?.room || body?.galleryCode || null;
+      } catch {
+        // no JSON body
+      }
+    }
+
+    room = String(room || "grand-hall").slice(0, 48);
+    await db.delete(messages).where(eq(messages.galleryCode, room));
+
+    return NextResponse.json({ ok: true, deleted: true, room });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Failed to delete messages" }, { status: 500 });
+  }
+}

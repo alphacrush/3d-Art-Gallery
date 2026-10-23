@@ -74,7 +74,6 @@ export async function POST(req: Request) {
           x: values.x,
           z: values.z,
           rotY: values.rotY,
-          // Only overwrite the emote when a fresh one is sent, so others can see it play out.
           ...(emote ? { emote, emoteAt: values.emoteAt } : {}),
           updatedAt: values.updatedAt,
         },

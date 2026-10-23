@@ -36,21 +36,11 @@ type Props = {
 type Puff = { sprite: THREE.Sprite; life: number };
 const EMOTE_MS: Record<string, number> = { wave: 1800, dance: 2600, jump: 700, spin: 900, bow: 1600 };
 
-/** Vertical physics constants */
-const GRAVITY = 26;          // m/s² – snappy but readable
-const JUMP_VELOCITY = 5.9;   // ~0.67 m hop
-const STEP_DOWN_GLUE = 0.8;  // walk down stairs instead of free-falling off them
-const STEP_UP_REACH = 0.9;   // how far above the feet the ground probe starts
+const GRAVITY = 26;
+const JUMP_VELOCITY = 5.9;
+const STEP_DOWN_GLUE = 0.8;
+const STEP_UP_REACH = 0.9;
 
-/**
- * Avatar animation + vertical resolver.
- *
- * IMPORTANT: `groundY` is the authoritative floor height under the feet.
- * The avatar is *always* resolved against it, so it can never float:
- *  - stepping UP  -> instant snap (feet follow the new tread immediately)
- *  - stepping DOWN-> glued while the drop is small (stairs / tiers)
- *  - real drops   -> proper gravity fall until contact
- */
 function animateAvatar(
   a: AvatarParts,
   speed: number,
@@ -89,7 +79,6 @@ function animateAvatar(
   a.eyes.scale.y = now < a.blinkUntil ? 0.12 : 1;
   if (now > a.blinkUntil && a.blinkUntil !== 0) a.blinkUntil = 0;
 
-  /* ---------- EMOTES ---------- */
   if (a.emote && !isSitting) {
     const t = (now - a.emoteStart) / (EMOTE_MS[a.emote] || 1500);
     if (t >= 1) a.emote = "";
@@ -99,30 +88,19 @@ function animateAvatar(
     else if (a.emote === "bow") { a.body.rotation.x = Math.sin(Math.min(t * 1.4, 1) * Math.PI) * 0.6; a.armL.rotation.x = -0.6; a.armR.rotation.x = -0.6; }
   }
 
-  /* ---------- VERTICAL: launch / resolve (only ONE source of truth) ---------- */
-  // jump launched through the emote system (pointer/keyboard) – guard against double firing
-  if (
-    !isSitting &&
-    a.emote === "jump" &&
-    a.vy <= 0 &&
-    a.y <= groundY + 0.02 &&
-    now - a.emoteStart < 120
-  ) {
+  if (!isSitting && a.emote === "jump" && a.vy <= 0 && a.y <= groundY + 0.02 && now - a.emoteStart < 120) {
     a.vy = JUMP_VELOCITY;
   }
 
   if (a.vy > 0 || a.y > groundY + 0.02) {
-    // airborne – integrate gravity
     a.vy -= GRAVITY * dt;
     a.y += a.vy * dt;
   }
 
   if (a.y <= groundY) {
-    // landed / stepped up onto a higher surface
     a.y = groundY;
     if (a.vy < 0) a.vy = 0;
   } else if (a.vy <= 0 && a.y - groundY <= STEP_DOWN_GLUE) {
-    // STICK: small drop (stairs, theatre tiers) -> glue to the floor, never hover
     a.y = groundY;
     a.vy = 0;
   }
@@ -130,7 +108,6 @@ function animateAvatar(
   const airborne = a.y > groundY + 0.06;
   if (airborne) { a.armL.rotation.z = 2.5; a.armR.rotation.z = -2.5; }
 
-  /* ---------- blob shadow / bubble / dust ---------- */
   const lift = THREE.MathUtils.clamp((a.y - groundY) / 1.2, 0, 1);
   a.blob.scale.setScalar(1 - lift * 0.35);
   (a.blob.material as THREE.MeshBasicMaterial).opacity = 0.32 * (1 - lift * 0.65);
@@ -155,40 +132,29 @@ function animateAvatar(
 
 const DOOR_X = 12;
 
-/* ---------------------------------------------------------------------------
-   WALKABLE VOLUMES
-   The room is a union of rectangles. Instead of hard clamping (which can trap
-   the player on a boundary), we snap to the NEAREST legal rectangle. That is
-   what lets the character roam the whole hall, the full-width theatre (aisles
-   included) and the connecting corridor without ever getting stuck.
---------------------------------------------------------------------------- */
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const PLAYER_R = 0.42;
 
 const WALKABLE: Rect[] = [
-  // main hall (walls at ±17.5 / ±11.5, 0.3 thick -> inner faces ±17.35 / ±11.35)
   { x0: -16.9, x1: 16.9, z0: -10.95, z1: 10.95 },
-  // doorway throat (between the jambs at x = 9.9 / 14.1)
   { x0: DOOR_X - 1.55, x1: DOOR_X + 1.55, z0: -16.05, z1: -10.85 },
-  // theatre auditorium – full 24 m width (walls at x = 0 / 24, front wall z = -42)
   { x0: DOOR_X - 11.5, x1: DOOR_X + 11.5, z0: -40.5, z1: -16.0 },
 ];
 
 const OBSTACLES: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [
-  { minX: -8.4, maxX: -3.6, minZ: -0.45, maxZ: 0.45 },   // west display panel
-  { minX: 4.6, maxX: 9.4, minZ: -0.45, maxZ: 0.45 },     // east display panel
-  { minX: -0.9, maxX: 1.9, minZ: -5.6, maxZ: -3.4 },     // sculpture plinth
-  { minX: -1.9, maxX: 1.9, minZ: 4.6, maxZ: 6.0 },       // centre sofa + table
-  { minX: -13.4, maxX: -10.6, minZ: -5.4, maxZ: -4.4 },  // west sofa
-  { minX: 11.6, maxX: 14.4, minZ: 4.4, maxZ: 5.4 },      // east sofa
-  { minX: -15.1, maxX: -13.9, minZ: -9.6, maxZ: -8.4 },  // piers
+  { minX: -8.4, maxX: -3.6, minZ: -0.45, maxZ: 0.45 },
+  { minX: 4.6, maxX: 9.4, minZ: -0.45, maxZ: 0.45 },
+  { minX: -0.9, maxX: 1.9, minZ: -5.6, maxZ: -3.4 },
+  { minX: -1.9, maxX: 1.9, minZ: 4.6, maxZ: 6.0 },
+  { minX: -13.4, maxX: -10.6, minZ: -5.4, maxZ: -4.4 },
+  { minX: 11.6, maxX: 14.4, minZ: 4.4, maxZ: 5.4 },
+  { minX: -15.1, maxX: -13.9, minZ: -9.6, maxZ: -8.4 },
   { minX: 13.9, maxX: 15.1, minZ: -9.6, maxZ: -8.4 },
   { minX: -15.1, maxX: -13.9, minZ: 8.4, maxZ: 9.6 },
   { minX: 13.9, maxX: 15.1, minZ: 8.4, maxZ: 9.6 },
 ];
 
 function collide(pos: THREE.Vector3) {
-  // 1) snap to nearest walkable rectangle
   let bx = pos.x, bz = pos.z, bestD = Infinity;
   for (const r of WALKABLE) {
     const cx = THREE.MathUtils.clamp(pos.x, r.x0, r.x1);
@@ -199,7 +165,6 @@ function collide(pos: THREE.Vector3) {
   }
   pos.x = bx; pos.z = bz;
 
-  // 2) push out of furniture (circle vs AABB, stable for corners)
   for (const o of OBSTACLES) {
     const cx = THREE.MathUtils.clamp(pos.x, o.minX, o.maxX);
     const cz = THREE.MathUtils.clamp(pos.z, o.minZ, o.maxZ);
@@ -211,7 +176,6 @@ function collide(pos: THREE.Vector3) {
         pos.x = cx + (dx / d) * PLAYER_R;
         pos.z = cz + (dz / d) * PLAYER_R;
       } else {
-        // dead centre inside the box – eject on the shortest axis
         const toMaxZ = o.maxZ - pos.z + PLAYER_R;
         const toMinZ = pos.z - o.minZ + PLAYER_R;
         const toMaxX = o.maxX - pos.x + PLAYER_R;
@@ -225,7 +189,6 @@ function collide(pos: THREE.Vector3) {
     }
   }
 
-  // 3) re-validate (an obstacle push must never eject the player out of the building)
   let ok = false;
   for (const r of WALKABLE) {
     if (pos.x >= r.x0 && pos.x <= r.x1 && pos.z >= r.z0 && pos.z <= r.z1) { ok = true; break; }
@@ -242,7 +205,6 @@ function collide(pos: THREE.Vector3) {
   }
 }
 
-/* ------------------------------------------------------------------ component */
 export default function Gallery3D(props: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const exhibitsRef = useRef<ExhibitDTO[]>(props.exhibits || []);
@@ -411,7 +373,6 @@ export default function Gallery3D(props: Props) {
     // Theater
     const theater = buildTheater(scene, seatMeshes, floorMeshes, DOOR_X);
 
-    /* dark underlay + skirt so no background shows around/below the theater */
     const underlay = new THREE.Mesh(
       new THREE.PlaneGeometry(24, 34),
       new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1 })
@@ -572,23 +533,66 @@ export default function Gallery3D(props: Props) {
     ];
     const glowMat = new THREE.MeshBasicMaterial({ map: softDot("rgba(120,170,255,0.75)", "rgba(120,170,255,0)"), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 
-    function applyDynamicSizing(frame: THREE.Mesh, matBoard: THREE.Mesh, art: THREE.Mesh, glass: THREE.Mesh, dropShadow: THREE.Mesh, glow: THREE.Mesh, plaque: THREE.Mesh, mediaW: number, mediaH: number) {
-      const ar = mediaW / Math.max(mediaH, 1); const targetArea = 3.8;
-      let fw = Math.sqrt(targetArea * ar); let fh = fw / ar;
-      if (fw > 3.6) { fw = 3.6; fh = fw / ar; }
-      if (fh > 2.4) { fh = 2.4; fw = fh * ar; }
-      const mw = fw - 0.16; const mh = fh - 0.16; const aw = mw - 0.20; const ah = mh - 0.20;
+    function applyDynamicSizing(
+      frame: THREE.Mesh,
+      matBoard: THREE.Mesh,
+      art: THREE.Mesh,
+      glass: THREE.Mesh,
+      dropShadow: THREE.Mesh,
+      glow: THREE.Mesh,
+      plaque: THREE.Mesh,
+      mediaW: number,
+      mediaH: number,
+      slotW: number,
+      slotH: number,
+    ) {
+      const fw = Math.max(0.55, slotW);
+      const fh = Math.max(0.55, slotH);
+
       if (frame.geometry) frame.geometry.dispose();
-      frame.geometry = new THREE.BoxGeometry(fw, fh, 0.07);
-      matBoard.scale.set(mw, mh, 1); art.scale.set(aw, ah, 1); glass.scale.set(mw, mh, 1);
-      dropShadow.scale.set(fw + 0.38, fh + 0.36, 1); glow.scale.set(fw + 1.38, fh + 1.22, 1);
-      plaque.position.set(-fw / 2 + 0.49, -fh / 2 - 0.41, 0.035);
+      frame.geometry = new THREE.BoxGeometry(fw, fh, 0.08);
+
+      const matPad = 0.07;
+      const mw = Math.max(0.2, fw - matPad * 2);
+      const mh = Math.max(0.2, fh - matPad * 2);
+      matBoard.scale.set(mw, mh, 1);
+      glass.scale.set(mw, mh, 1);
+
+      const artPad = 0.09;
+      const maxAw = Math.max(0.12, mw - artPad * 2);
+      const maxAh = Math.max(0.12, mh - artPad * 2);
+      const ar = Math.max(0.05, mediaW) / Math.max(0.05, mediaH);
+      let aw = maxAw;
+      let ah = aw / ar;
+      if (ah > maxAh) {
+        ah = maxAh;
+        aw = ah * ar;
+      }
+      art.scale.set(aw, ah, 1);
+
+      dropShadow.scale.set(fw + 0.42, fh + 0.40, 1);
+      glow.scale.set(fw + 1.5, fh + 1.35, 1);
+      plaque.position.set(
+        THREE.MathUtils.clamp(-fw / 2 + 0.48, -fw / 2 + 0.15, fw / 2 - 0.15),
+        -fh / 2 - 0.42,
+        0.04,
+      );
     }
 
     function rebuild(exList: ExhibitDTO[]) {
-      framesGroup.traverse((o) => { const mesh = o as THREE.Mesh; if (mesh.geometry) mesh.geometry.dispose(); });
-      framesGroup.clear(); artMeshes.length = 0; frameUnits.length = 0; cinemaVideo = null;
-      videoEls.forEach((v) => { v.pause(); v.removeAttribute("src"); v.load(); });
+      framesGroup.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
+      framesGroup.clear();
+      artMeshes.length = 0;
+      frameUnits.length = 0;
+      cinemaVideo = null;
+      videoEls.forEach((v) => {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+      });
       videoEls.length = 0;
       disposables.forEach((d) => d.dispose());
       disposables.length = 0;
@@ -597,35 +601,99 @@ export default function Gallery3D(props: Props) {
         const ex = exList.find((e) => e.slot === i);
         const isEmpty = !ex || !ex.id;
 
-        let { x, y, z, rotY } = getSlotPose(i);
+        const pose = getSlotPose(i);
+        const { x, y, z, rotY } = pose;
+        const slotW = typeof pose.width === "number" ? pose.width : 2.0;
+        const slotH = typeof pose.height === "number" ? pose.height : 1.6;
 
-        if (z < -8 && x > DOOR_X - 6.5 && x < DOOR_X + 6.5) {
-          if (i % 2 === 0) { x = DOOR_X - 1.85; rotY = Math.PI / 2; }
-          else { x = DOOR_X + 1.85; rotY = -Math.PI / 2; }
-          z = -12.5 - ((i % 4) * 1.5);
-        }
+        const g = new THREE.Group();
+        g.position.set(x, y, z);
+        g.rotation.y = rotY;
 
-        const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rotY;
+        const frame = new THREE.Mesh(
+          new THREE.BoxGeometry(slotW, slotH, 0.08),
+          frameMats[i % 3],
+        );
+        frame.castShadow = frame.receiveShadow = true;
+        g.add(frame);
 
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 0.07), frameMats[i % 3]); frame.castShadow = frame.receiveShadow = true; g.add(frame);
-        const matBoard = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xfcfcfb })); matBoard.position.z = 0.038; g.add(matBoard);
+        const matBoard = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          new THREE.MeshStandardMaterial({ color: 0xfbfbfa }),
+        );
+        matBoard.position.z = 0.038;
+        g.add(matBoard);
+
         const artMat = new THREE.MeshBasicMaterial({ color: 0xe8e6e1 });
-        const art = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), artMat); art.position.z = 0.046; art.userData = { slotIdx: i, exhibitId: ex?.id }; g.add(art); artMeshes.push(art); disposables.push(artMat);
-        const glass = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.04, transparent: true, opacity: 0.05, depthWrite: false })); glass.position.z = 0.05; g.add(glass);
-        const dropShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot("rgba(40,44,54,0.42)", "rgba(40,44,54,0)"), transparent: true, opacity: 0.5, depthWrite: false })); dropShadow.position.set(0.04, -0.06, -0.012); g.add(dropShadow);
-        const glowClone = glowMat.clone(); const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), glowClone); glow.position.z = -0.02; g.add(glow); disposables.push(glowClone);
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), artMat);
+        art.position.z = 0.046;
+        art.userData = { slotIdx: i, exhibitId: ex?.id };
+        g.add(art);
+        artMeshes.push(art);
+        disposables.push(artMat);
 
-        const ptex = plaqueTexture(isEmpty ? "Empty Canvas" : ex.title, isEmpty ? "Click to add artwork" : ex.artist); disposables.push(ptex);
-        const plaqueMat = new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.8, metalness: 0.05 });
-        const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), plaqueMat); g.add(plaque); disposables.push(plaqueMat);
+        const glass = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            roughness: 0.04,
+            transparent: true,
+            opacity: 0.05,
+            depthWrite: false,
+          }),
+        );
+        glass.position.z = 0.05;
+        g.add(glass);
+
+        const dropShadow = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          new THREE.MeshBasicMaterial({
+            map: softDot("rgba(40,44,54,0.42)", "rgba(40,44,54,0)"),
+            transparent: true,
+            opacity: 0.5,
+            depthWrite: false,
+          }),
+        );
+        dropShadow.position.set(0.04, -0.06, -0.012);
+        g.add(dropShadow);
+
+        const glowClone = glowMat.clone();
+        const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), glowClone);
+        glow.position.z = -0.02;
+        g.add(glow);
+        disposables.push(glowClone);
+
+        const ptex = plaqueTexture(
+          isEmpty ? "Empty Canvas" : ex.title,
+          isEmpty ? "Click to add artwork" : ex.artist,
+        );
+        disposables.push(ptex);
+        const plaqueMat = new THREE.MeshStandardMaterial({
+          map: ptex,
+          roughness: 0.8,
+          metalness: 0.05,
+        });
+        const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), plaqueMat);
+        g.add(plaque);
+        disposables.push(plaqueMat);
+
+        applyDynamicSizing(
+          frame, matBoard, art, glass, dropShadow, glow, plaque,
+          slotW, slotH, slotW, slotH,
+        );
 
         if (isEmpty) {
-          applyDynamicSizing(frame, matBoard, art, glass, dropShadow, glow, plaque, 1, 1);
           artMat.map = plaqueTexture("+", "");
+          artMat.needsUpdate = true;
         } else if (ex.mediaType === "video") {
           const video = document.createElement("video");
-          video.crossOrigin = "anonymous"; video.muted = true; video.loop = true; video.playsInline = true; video.autoplay = true;
-          video.src = ex.url; videoEls.push(video);
+          video.crossOrigin = "anonymous";
+          video.muted = true;
+          video.loop = true;
+          video.playsInline = true;
+          video.autoplay = true;
+          video.src = ex.url;
+          videoEls.push(video);
           const vtex = new THREE.VideoTexture(video);
           vtex.colorSpace = THREE.SRGBColorSpace;
           vtex.minFilter = THREE.LinearFilter;
@@ -633,21 +701,38 @@ export default function Gallery3D(props: Props) {
           vtex.generateMipmaps = false;
           disposables.push(vtex);
           video.addEventListener("loadeddata", () => {
-            artMat.map = vtex; artMat.needsUpdate = true;
-            if (video.videoWidth) applyDynamicSizing(frame, matBoard, art, glass, dropShadow, glow, plaque, video.videoWidth, video.videoHeight);
+            artMat.map = vtex;
+            artMat.color.set(0xffffff);
+            artMat.needsUpdate = true;
+            applyDynamicSizing(
+              frame, matBoard, art, glass, dropShadow, glow, plaque,
+              video.videoWidth || slotW,
+              video.videoHeight || slotH,
+              slotW,
+              slotH,
+            );
             video.play().catch(() => {});
           });
         } else {
           loader.load(ex.url, (t) => {
-            t.colorSpace = THREE.SRGBColorSpace; disposables.push(t);
-            artMat.map = t; artMat.needsUpdate = true;
-            applyDynamicSizing(frame, matBoard, art, glass, dropShadow, glow, plaque, t.image.width, t.image.height);
+            t.colorSpace = THREE.SRGBColorSpace;
+            disposables.push(t);
+            artMat.map = t;
+            artMat.color.set(0xffffff);
+            artMat.needsUpdate = true;
+            const iw = (t.image as HTMLImageElement)?.width || slotW;
+            const ih = (t.image as HTMLImageElement)?.height || slotH;
+            applyDynamicSizing(
+              frame, matBoard, art, glass, dropShadow, glow, plaque,
+              iw, ih, slotW, slotH,
+            );
           });
         }
-        framesGroup.add(g); frameUnits.push({ group: g, glow, hover: 0 });
+
+        framesGroup.add(g);
+        frameUnits.push({ group: g, glow, hover: 0 });
       }
 
-      // Slot 100: Cinema Screen
       const cinemaEx = exList.find((e) => e.slot === 100);
       const cEmpty = !cinemaEx || !cinemaEx.id;
       const cGroup = new THREE.Group(); cGroup.position.set(DOOR_X, 3.8, -41.4);
@@ -685,12 +770,6 @@ export default function Gallery3D(props: Props) {
       framesGroup.add(cGroup);
     }
 
-    /* ---------------------------------------------------------------
-       PLAYER
-       Spawned mid-hall so the third-person boom never has to leave the
-       building (the old spawn at z = 9.6 pushed the camera through the
-       back wall).
-    --------------------------------------------------------------- */
     const id0 = identityRef.current;
     let local = makeAvatar(id0.gender, id0.color, id0.hat, id0.name, true);
     scene.add(local.group);
@@ -742,9 +821,6 @@ export default function Gallery3D(props: Props) {
     let isSitting = false;
     const sitTarget = new THREE.Vector3();
     let sitRotY = 0;
-
-    /** last valid floor height – used as a fallback so a missed ray can never
-     *  teleport the avatar back up to y = 0 (the classic "floating" bug). */
     let lastGroundY = 0;
 
     const isTyping = () => {
@@ -821,7 +897,6 @@ export default function Gallery3D(props: Props) {
 
       setNdc(e.clientX, e.clientY);
 
-      // Control desk
       const btnHit = raycaster.intersectObjects(theater.controlBtns, false)[0];
       if (btnHit) {
         const action = btnHit.object.userData.isControlBtn;
@@ -838,7 +913,6 @@ export default function Gallery3D(props: Props) {
         return;
       }
 
-      // Artwork / screen
       const artHit = raycaster.intersectObjects(artMeshes, false)[0];
       if (artHit) {
         const slotIdx = artHit.object.userData.slotIdx as number;
@@ -869,7 +943,6 @@ export default function Gallery3D(props: Props) {
         return;
       }
 
-      // Seats
       const seatHit = raycaster.intersectObjects(seatMeshes, false)[0];
       if (seatHit) {
         const sp = seatHit.object.userData.sitPose;
@@ -880,7 +953,6 @@ export default function Gallery3D(props: Props) {
         return;
       }
 
-      // Floor – walk anywhere that is walkable
       const floorHit = raycaster.intersectObjects(floorMeshes, true)[0];
       if (floorHit) {
         if (isSitting) {
@@ -937,21 +1009,36 @@ export default function Gallery3D(props: Props) {
     const camDesired = new THREE.Vector3();
     const probeOrigin = new THREE.Vector3();
 
-    /** Keeps the third-person boom inside the current room so the camera can
-     *  never end up behind a wall (and the step-outside view stays correct). */
+    /* ---------------- REMOTE PLAYERS ---------------- */
+    type RemoteAvatar = AvatarParts & {
+      lastX: number;
+      lastZ: number;
+      lastEmoteNonce?: number;
+    };
+    const remoteAvatars = new Map<string, RemoteAvatar>();
+
+    const getRemoteId = (p: PlayerDTO): string => {
+      return String(
+        (p as any).id ??
+        (p as any).clientId ??
+        (p as any).socketId ??
+        (p as any).sessionId ??
+        (p as any).playerId ??
+        (p as any).name ??
+        ""
+      );
+    };
+
     const clampCamera = (p: THREE.Vector3) => {
       const t = playerPos;
       if (t.z > -11.35 && t.z < 11.35 && Math.abs(t.x) < 17.35) {
-        // hall
         p.x = THREE.MathUtils.clamp(p.x, -17.05, 17.05);
         p.z = THREE.MathUtils.clamp(p.z, -11.05, 11.05);
         p.y = Math.min(p.y, HALL.h - 0.35);
       } else if (t.z < -15.9) {
-        // theatre
         p.x = THREE.MathUtils.clamp(p.x, DOOR_X - 11.7, DOOR_X + 11.7);
         p.z = THREE.MathUtils.clamp(p.z, -41.2, -16.15);
       } else {
-        // corridor
         p.x = THREE.MathUtils.clamp(p.x, DOOR_X - 1.75, DOOR_X + 1.75);
         p.z = THREE.MathUtils.clamp(p.z, -16.4, -10.6);
       }
@@ -963,7 +1050,6 @@ export default function Gallery3D(props: Props) {
       const dt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
 
-      /* teleport */
       const tp = teleportRef.current;
       if (tp && tp.nonce !== lastTeleportNonce) {
         lastTeleportNonce = tp.nonce;
@@ -973,14 +1059,12 @@ export default function Gallery3D(props: Props) {
         walkTarget = null; isSitting = false; local.vy = 0;
       }
 
-      /* emote */
       const em = emoteRef.current;
       if (em && em.nonce !== lastEmoteNonce) {
         lastEmoteNonce = em.nonce;
         triggerEmote(local, em.emote, now);
       }
 
-      /* ---------------- input ---------------- */
       let ix = 0; let iz = 0;
       if (!isTyping()) {
         if (keys.has("w") || keys.has("arrowup")) iz += 1;
@@ -1000,7 +1084,6 @@ export default function Gallery3D(props: Props) {
       const speed = keys.has("shift") ? 6.6 : 3.7;
       let moveSpeed = 0;
 
-      /* ---------------- horizontal ---------------- */
       if (isSitting) {
         playerPos.x += (sitTarget.x - playerPos.x) * Math.min(1, dt * 10);
         playerPos.z += (sitTarget.z - playerPos.z) * Math.min(1, dt * 10);
@@ -1033,12 +1116,6 @@ export default function Gallery3D(props: Props) {
         }
       }
 
-      /* ---------------- GROUND SOLVER ----------------
-         One probe for the entire building. The ray starts just above the feet
-         so it can only ever find a surface BELOW the character – that is what
-         stops the avatar popping up onto tier overhangs.
-         If the probe misses (no floor registered at that spot) we keep the last
-         valid height instead of falling back to 0, which killed the floating. */
       probeOrigin.set(playerPos.x, (local.y || 0) + STEP_UP_REACH, playerPos.z);
       rayFloor.set(probeOrigin, DOWN);
       const gHits = rayFloor.intersectObjects(floorMeshes, true);
@@ -1048,13 +1125,88 @@ export default function Gallery3D(props: Props) {
         lastGroundY = groundY;
       }
 
-      /* ---------------- vertical + pose ---------------- */
       const spin = animateAvatar(local, moveSpeed, dt, now, undefined, isSitting, groundY);
       local.group.position.set(playerPos.x, local.y, playerPos.z);
       local.group.rotation.y = playerRot + spin;
       positionRef.current = { x: playerPos.x, z: playerPos.z, rotY: playerRot };
 
-      /* ---------------- frame hover ---------------- */
+      /* ---------------- REMOTE PLAYER SYNC ---------------- */
+      const activeIds = new Set<string>();
+      const remotes = remoteRef.current || [];
+
+      for (const p of remotes) {
+        const id = getRemoteId(p);
+        if (!id) continue;
+        activeIds.add(id);
+
+        let ra = remoteAvatars.get(id);
+
+        if (!ra) {
+          const base = makeAvatar(
+            p.gender || "female",
+            p.color || "#ff6b6b",
+            p.hat || "none",
+            p.name || "Guest",
+            false,
+          );
+          ra = Object.assign(base, {
+            lastX: p.x,
+            lastZ: p.z,
+            lastEmoteNonce: 0,
+          }) as RemoteAvatar;
+          ra.group.position.set(p.x, 0, p.z);
+          ra.group.rotation.y = p.rotY || 0;
+          scene.add(ra.group);
+          remoteAvatars.set(id, ra);
+        }
+
+        const prevX = ra.group.position.x;
+        const prevZ = ra.group.position.z;
+        const dxTarget = p.x - prevX;
+        const dzTarget = p.z - prevZ;
+        const distToTarget = Math.hypot(dxTarget, dzTarget);
+
+        if (distToTarget > 4) {
+          ra.group.position.x = p.x;
+          ra.group.position.z = p.z;
+        } else {
+          const t = Math.min(1, dt * 10);
+          ra.group.position.x = prevX + dxTarget * t;
+          ra.group.position.z = prevZ + dzTarget * t;
+        }
+
+        ra.group.rotation.y = angleLerp(ra.group.rotation.y, p.rotY || 0, Math.min(1, dt * 12));
+
+        const remoteEmote = (p as any).emote;
+        const remoteEmoteNonce = (p as any).emoteNonce;
+        if (remoteEmote && remoteEmoteNonce !== undefined && remoteEmoteNonce !== ra.lastEmoteNonce) {
+          ra.lastEmoteNonce = remoteEmoteNonce;
+          triggerEmote(ra, remoteEmote, now);
+        }
+
+        const movedDist = Math.hypot(
+          ra.group.position.x - ra.lastX,
+          ra.group.position.z - ra.lastZ,
+        );
+        const remoteSpeed = dt > 0 ? Math.min(movedDist / dt, 8) : 0;
+        ra.lastX = ra.group.position.x;
+        ra.lastZ = ra.group.position.z;
+
+        probeOrigin.set(ra.group.position.x, (ra.y || 0) + STEP_UP_REACH, ra.group.position.z);
+        rayFloor.set(probeOrigin, DOWN);
+        const rHits = rayFloor.intersectObjects(floorMeshes, true);
+        const rGround = rHits.length ? rHits[0].point.y : 0;
+
+        animateAvatar(ra, remoteSpeed, dt, now, undefined, false, rGround);
+      }
+
+      for (const [id, ra] of remoteAvatars.entries()) {
+        if (!activeIds.has(id)) {
+          scene.remove(ra.group);
+          remoteAvatars.delete(id);
+        }
+      }
+
       for (let i = 0; i < frameUnits.length; i++) {
         const fu = frameUnits[i];
         const want = i === hoveredSlot ? 1 : 0;
@@ -1063,7 +1215,6 @@ export default function Gallery3D(props: Props) {
         (fu.glow.material as THREE.MeshBasicMaterial).opacity = fu.hover * 0.75;
       }
 
-      /* ---------------- theatre mood ---------------- */
       const isPlaying = !!cinemaVideo && !cinemaVideo.paused;
 
       const targetIntensity = isTheaterDark ? 0.02 : 3.5;
@@ -1077,7 +1228,6 @@ export default function Gallery3D(props: Props) {
       const targetBeamOpacity = isTheaterDark && isPlaying ? 0.12 + Math.random() * 0.02 : 0;
       theater.beamMat.opacity += (targetBeamOpacity - theater.beamMat.opacity) * dt * 4;
 
-      /* ---------------- camera ---------------- */
       bob += dt * (moveSpeed > 0.1 ? 9 + moveSpeed : 1.4);
 
       camTarget.set(
@@ -1122,6 +1272,10 @@ export default function Gallery3D(props: Props) {
       canvas.removeEventListener("wheel", onWheel);
       videoEls.forEach((v) => { v.pause(); v.removeAttribute("src"); v.load(); });
       disposables.forEach((d) => d.dispose());
+      for (const [, ra] of remoteAvatars.entries()) {
+        scene.remove(ra.group);
+      }
+      remoteAvatars.clear();
       composer?.dispose();
       envRT.texture.dispose();
       pmrem.dispose();

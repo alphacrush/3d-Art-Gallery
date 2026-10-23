@@ -44,49 +44,88 @@ export type SlotPose = {
   x: number;
   y: number;
   z: number;
-  rotY: number; // facing into the room
-  viewX: number; // where the avatar stands to view it
+  rotY: number;
+  viewX: number;
   viewZ: number;
   wall: string;
+  /** Outer frame width (metres) */
+  width: number;
+  /** Outer frame height (metres) */
+  height: number;
 };
 
-/** Ordered hanging slots around the room + two free-standing panels. */
+function createSlot(
+  x: number,
+  y: number,
+  z: number,
+  rotY: number,
+  width: number,
+  height: number,
+  wall: string,
+): SlotPose {
+  // Dynamic viewing distance: stand further back for huge paintings
+  const viewDist = Math.max(2.2, Math.max(width, height) * 0.75 + 0.55);
+  return {
+    x, y, z, rotY,
+    viewX: x + Math.sin(rotY) * viewDist,
+    viewZ: z + Math.cos(rotY) * viewDist,
+    wall, width, height,
+  };
+}
+
+/**
+ * 30 Salon-style slots spanning the FULL 38m room.
+ * Mixing big heroes, portrait, landscape, and stacked clusters.
+ */
 export function getSlotPose(index: number): SlotPose {
-  const y = 2.15;
-  const slots: SlotPose[] = [];
-  const northZ = -HALL.d / 2 + 0.12;
-  const southZ = HALL.d / 2 - 0.12;
-  const westX = -HALL.w / 2 + 0.12;
-  const eastX = HALL.w / 2 - 0.12;
+  const N = -HALL.d / 2 + 0.12; // -12.88
+  const S =  HALL.d / 2 - 0.12; //  12.88
+  const W = -HALL.w / 2 + 0.12; // -18.88
+  const E =  HALL.w / 2 - 0.12; //  18.88
 
-  // North wall (faces +z) — 8 slots
-  for (let i = 0; i < 8; i++) {
-    const x = -14 + i * 4;
-    slots.push({ x, y, z: northZ, rotY: 0, viewX: x, viewZ: northZ + 2.6, wall: "North wall" });
-  }
-  // East wall (faces -x) — 5 slots
-  for (let i = 0; i < 5; i++) {
-    const z = -8.8 + i * 4.4;
-    slots.push({ x: eastX, y, z, rotY: -Math.PI / 2, viewX: eastX - 2.6, viewZ: z, wall: "East wall" });
-  }
-  // South wall (faces -z) — 8 slots (skip centre entrance visually by offset)
-  for (let i = 0; i < 8; i++) {
-    const x = 14 - i * 4;
-    slots.push({ x, y, z: southZ, rotY: Math.PI, viewX: x, viewZ: southZ - 2.6, wall: "South wall" });
-  }
-  // West wall (faces +x) — 5 slots
-  for (let i = 0; i < 5; i++) {
-    const z = 8.8 - i * 4.4;
-    slots.push({ x: westX, y, z, rotY: Math.PI / 2, viewX: westX + 2.6, viewZ: z, wall: "West wall" });
-  }
-  // Free-standing panel A (double sided) at x=-6, z=0
-  slots.push({ x: -6, y, z: -0.16, rotY: Math.PI, viewX: -6, viewZ: -2.8, wall: "Panel A" });
-  slots.push({ x: -6, y, z: 0.16, rotY: 0, viewX: -6, viewZ: 2.8, wall: "Panel A" });
-  // Free-standing panel B at x=7, z=0
-  slots.push({ x: 7, y, z: -0.16, rotY: Math.PI, viewX: 7, viewZ: -2.8, wall: "Panel B" });
-  slots.push({ x: 7, y, z: 0.16, rotY: 0, viewX: 7, viewZ: 2.8, wall: "Panel B" });
+  const slots: SlotPose[] = [
+    // --- NORTH WALL (8 slots) | Has a gap between x=10 and x=14 for the door ---
+    createSlot(-16.0, 2.40, N, 0, 1.8, 2.5, "North"),
+    createSlot(-11.5, 3.30, N, 0, 2.0, 1.3, "North (Top)"),
+    createSlot(-11.5, 1.60, N, 0, 2.0, 1.5, "North (Bottom)"),
+    createSlot( -4.0, 2.60, N, 0, 4.8, 3.0, "North · Hero"), // Massive centerpiece
+    createSlot(  3.0, 2.45, N, 0, 2.2, 2.2, "North"),
+    createSlot(  7.5, 3.25, N, 0, 1.6, 1.2, "North (Top)"),
+    createSlot(  7.5, 1.65, N, 0, 1.6, 1.4, "North (Bottom)"),
+    createSlot( 16.0, 2.45, N, 0, 2.4, 1.8, "North"),
 
-  return slots[index % slots.length];
+    // --- SOUTH WALL (9 slots) ---
+    createSlot(-16.0, 2.35, S, Math.PI, 2.4, 1.6, "South"),
+    createSlot(-11.0, 2.45, S, Math.PI, 2.0, 2.0, "South"),
+    createSlot( -6.0, 3.20, S, Math.PI, 1.6, 1.3, "South (Top)"),
+    createSlot( -6.0, 1.65, S, Math.PI, 1.6, 1.3, "South (Bottom)"),
+    createSlot(  0.0, 2.55, S, Math.PI, 4.5, 2.8, "South · Hero"),
+    createSlot(  6.0, 3.15, S, Math.PI, 1.8, 1.2, "South (Top)"),
+    createSlot(  6.0, 1.55, S, Math.PI, 1.8, 1.4, "South (Bottom)"),
+    createSlot( 11.0, 2.40, S, Math.PI, 1.6, 2.4, "South"),
+    createSlot( 16.0, 2.45, S, Math.PI, 2.2, 2.2, "South"),
+
+    // --- WEST WALL (5 slots) ---
+    createSlot(W, 2.40, -8.0, Math.PI / 2, 2.2, 2.2, "West"),
+    createSlot(W, 2.50, -3.0, Math.PI / 2, 1.8, 2.6, "West"),
+    createSlot(W, 2.60,  3.0, Math.PI / 2, 3.8, 2.4, "West · Hero"),
+    createSlot(W, 3.25,  9.0, Math.PI / 2, 1.8, 1.2, "West (Top)"),
+    createSlot(W, 1.65,  9.0, Math.PI / 2, 1.8, 1.4, "West (Bottom)"),
+
+    // --- EAST WALL (4 slots) ---
+    createSlot(E, 2.45, -7.0, -Math.PI / 2, 2.4, 1.8, "East"),
+    createSlot(E, 2.60,  0.0, -Math.PI / 2, 4.0, 2.6, "East · Hero"),
+    createSlot(E, 3.20,  7.0, -Math.PI / 2, 2.0, 1.4, "East (Top)"),
+    createSlot(E, 1.60,  7.0, -Math.PI / 2, 2.0, 1.4, "East (Bottom)"),
+
+    // --- PANELS (4 slots) ---
+    createSlot(-6, 2.40, -0.16, Math.PI, 2.8, 2.0, "Panel A"),
+    createSlot(-6, 2.50,  0.16, 0,       2.2, 2.8, "Panel A"),
+    createSlot( 7, 2.45, -0.16, Math.PI, 2.4, 2.4, "Panel B"),
+    createSlot( 7, 2.35,  0.16, 0,       3.0, 1.8, "Panel B"),
+  ];
+
+  return slots[((index % 30) + 30) % 30];
 }
 
 export const TOTAL_SLOTS = 30;
